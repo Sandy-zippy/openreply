@@ -144,6 +144,65 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return data as T;
 }
 
+// Meta error_subcode for "The action is invalid as it's not the thread owner":
+// another app (e.g. a since-removed ManyChat) still controls the DM thread.
+const NOT_THREAD_OWNER = 2534037;
+
+let threadOwnerFallback: ((userId: string) => Promise<string | null>) | null =
+  null;
+
+/**
+ * Register how to find a user's most recent comment id. When a DM by user id
+ * is refused because another app owns the thread, the message is re-sent as a
+ * private reply to that comment, which Meta still accepts.
+ */
+export function setThreadOwnerFallback(
+  fn: (userId: string) => Promise<string | null>
+): void {
+  threadOwnerFallback = fn;
+}
+
+async function sendToUser(
+  accessToken: string,
+  instagramAccountId: string,
+  userId: string,
+  message: unknown
+): Promise<{ recipient_id: string; message_id: string }> {
+  const post = (recipient: Record<string, string>) =>
+    fetch(`${instagramGraphBase()}/${instagramAccountId}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ recipient, message }),
+    });
+
+  const response = await post({ id: userId });
+  if (!response.ok && threadOwnerFallback) {
+    const data = await response.clone().json().catch(() => null);
+    if (data?.error?.error_subcode === NOT_THREAD_OWNER) {
+      const commentId = await threadOwnerFallback(userId);
+      if (commentId) {
+        try {
+          return await handleResponse(await post({ comment_id: commentId }));
+        } catch (error) {
+          // Repeat private replies on one comment come back as generic code
+          // 1/2 yet are delivered (verified by webhook echo, 25 Sep 2026).
+          if (
+            error instanceof MetaApiError &&
+            (error.code === 1 || error.code === 2)
+          ) {
+            return { recipient_id: userId, message_id: "" };
+          }
+          throw error;
+        }
+      }
+    }
+  }
+  return handleResponse(response);
+}
+
 export async function sendPrivateReply(
   accessToken: string,
   instagramAccountId: string,
@@ -225,33 +284,18 @@ export async function sendDirectMessageWithButton(
   buttonTitle: string,
   payload: string
 ): Promise<{ recipient_id: string; message_id: string }> {
-  const response = await fetch(
-    `${instagramGraphBase()}/${instagramAccountId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+  return sendToUser(accessToken, instagramAccountId, userId, {
+    attachment: {
+      type: "template",
+      payload: {
+        template_type: "button",
+        text: text.slice(0, 640),
+        buttons: [
+          { type: "postback", title: buttonTitle.slice(0, 20), payload },
+        ],
       },
-      body: JSON.stringify({
-        recipient: { id: userId },
-        message: {
-          attachment: {
-            type: "template",
-            payload: {
-              template_type: "button",
-              text: text.slice(0, 640),
-              buttons: [
-                { type: "postback", title: buttonTitle.slice(0, 20), payload },
-              ],
-            },
-          },
-        },
-      }),
-    }
-  );
-
-  return handleResponse(response);
+    },
+  });
 }
 
 /**
@@ -347,22 +391,7 @@ export async function sendDirectMessage(
   userId: string,
   message: string
 ): Promise<{ recipient_id: string; message_id: string }> {
-  const response = await fetch(
-    `${instagramGraphBase()}/${instagramAccountId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        recipient: { id: userId },
-        message: { text: message },
-      }),
-    }
-  );
-
-  return handleResponse(response);
+  return sendToUser(accessToken, instagramAccountId, userId, { text: message });
 }
 
 /**
@@ -376,31 +405,16 @@ export async function sendDirectMessageWithLinkButton(
   text: string,
   buttons: LinkButton[]
 ): Promise<{ recipient_id: string; message_id: string }> {
-  const response = await fetch(
-    `${instagramGraphBase()}/${instagramAccountId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+  return sendToUser(accessToken, instagramAccountId, userId, {
+    attachment: {
+      type: "template",
+      payload: {
+        template_type: "button",
+        text: text.slice(0, 640),
+        buttons: toWebUrlButtons(buttons),
       },
-      body: JSON.stringify({
-        recipient: { id: userId },
-        message: {
-          attachment: {
-            type: "template",
-            payload: {
-              template_type: "button",
-              text: text.slice(0, 640),
-              buttons: toWebUrlButtons(buttons),
-            },
-          },
-        },
-      }),
-    }
-  );
-
-  return handleResponse(response);
+    },
+  });
 }
 
 export async function sendCommentReply(

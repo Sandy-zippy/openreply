@@ -63,6 +63,7 @@ vi.mock("@/lib/meta/client", () => ({
   sendDirectMessage: mockSendDirectMessage,
   sendDirectMessageWithLinkButton: mockSendDirectMessageWithLinkButton,
   sendCommentReply: vi.fn(),
+  setThreadOwnerFallback: vi.fn(),
   MetaApiError: class MetaApiError extends Error {
     code: number;
     constructor(

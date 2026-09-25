@@ -24,6 +24,7 @@ import {
   sendPrivateReply,
   sendPrivateReplyWithButton,
   sendPrivateReplyWithLinkButton,
+  setThreadOwnerFallback,
 } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
@@ -1270,6 +1271,22 @@ async function recordWorkerFailure(
 }
 
 export function createDMWorker(): Worker<DmQueueJob> {
+  // DMs refused as "not the thread owner" go out as a private reply to the
+  // user's latest comment instead (Meta keeps those open for 7 days).
+  setThreadOwnerFallback(async (userId) => {
+    const logs = await prisma.dmLog.findMany({
+      where: {
+        commenterId: userId,
+        createdAt: { gte: new Date(Date.now() - 7 * 24 * 3600 * 1000) },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { commentId: true },
+      take: 20,
+    });
+    // Real comment ids are numeric; tap/DM dedupe rows use prefixed ids.
+    return logs.find((l) => /^\d+$/.test(l.commentId))?.commentId ?? null;
+  });
+
   const worker = new Worker<DmQueueJob>(
     "dm-processing",
     processJob,
