@@ -494,6 +494,22 @@ describe("DM Worker — Full Pipeline", () => {
     });
   });
 
+  it("should not retry (and re-send) when Meta returns its generic code 1/2 error", async () => {
+    const { MetaApiError } = await import("@/lib/meta/client");
+    mockSendPrivateReply.mockRejectedValue(
+      new MetaApiError(1, undefined, undefined, "An unknown error has occurred.")
+    );
+
+    const processor = getProcessor();
+
+    await expect(processor(createMockJob())).resolves.toBeUndefined();
+    expect(mockPrisma.dmLog.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "SENT" }),
+      })
+    );
+  });
+
   it("should handle missing access token", async () => {
     mockPrisma.automation.findMany.mockResolvedValue([
       {

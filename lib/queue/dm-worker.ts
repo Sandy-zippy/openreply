@@ -658,6 +658,31 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         },
       });
     } catch (error) {
+      // Meta's generic errors (code 1 "unknown", code 2 "unexpected") on a
+      // private reply come back AFTER the DM was delivered — the webhook echo
+      // lands in the thread each time. Retrying re-sends the same DM, so a
+      // commenter got it three times (+5 and +15 min). A comment only gets one
+      // private reply anyway, so treat these as sent and stop.
+      if (
+        error instanceof MetaApiError &&
+        (error.code === 1 || error.code === 2)
+      ) {
+        await prisma.dmLog.update({
+          where: {
+            automationId_commentId: {
+              automationId: automation.id,
+              commentId,
+            },
+          },
+          data: {
+            status: "SENT",
+            dmSentAt: new Date(),
+            errorMessage: `${formatError(error)} (not retried: Meta delivers the DM despite this error)`,
+          },
+        });
+        continue;
+      }
+
       await releaseWorkspaceDMReservation(
         automation.workspaceId,
         usage.periodStart
