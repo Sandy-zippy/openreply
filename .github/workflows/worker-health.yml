@@ -1,0 +1,14 @@
+# Emails the repo owner (GitHub's failed-run notice) when the DM worker stops
+# heartbeating. Runs outside the Mac Mini, so it catches a dead Mini or home internet.
+name: worker-health
+on:
+  schedule: [{ cron: "*/15 * * * *" }]
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          body=$(curl -s --max-time 30 https://openreply-ebon-mu.vercel.app/api/health)
+          echo "$body"
+          echo "$body" | grep -q '"worker":{"healthy":true' || { echo "::error::DM worker is down"; exit 1; }
