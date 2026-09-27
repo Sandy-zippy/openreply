@@ -1293,6 +1293,11 @@ export function createDMWorker(): Worker<DmQueueJob> {
     {
       connection: getRedisConnection(),
       concurrency: 5,
+      // Idle Redis traffic. BullMQ defaults (5s / 30s) cost ~3.6M commands a
+      // month; 60s / 300s fits a 500K/month free Redis. New jobs still wake the
+      // worker immediately; only stalled-job detection gets slower.
+      drainDelay: Number(process.env.BULLMQ_DRAIN_DELAY_S ?? 5),
+      stalledInterval: Number(process.env.BULLMQ_STALLED_INTERVAL_MS ?? 30_000),
       settings: {
         backoffStrategy: (attemptsMade: number) =>
           BACKOFF_DELAYS[Math.min(attemptsMade - 1, BACKOFF_DELAYS.length - 1)],

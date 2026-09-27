@@ -5,7 +5,10 @@ import os from "node:os";
 
 const worker = createDMWorker();
 const startedAt = new Date().toISOString();
-const HEARTBEAT_INTERVAL_MS = 30_000;
+// Must stay under the 120s heartbeat TTL in lib/ops/worker-health.ts.
+const HEARTBEAT_INTERVAL_MS = Number(
+  process.env.WORKER_HEARTBEAT_INTERVAL_MS ?? 30_000
+);
 // Polling safety net for comments that webhooks miss. Runs in the worker because
 // it must fire every few minutes and Vercel's free crons only run once a day.
 const POLL_INTERVAL_MS = Number(
