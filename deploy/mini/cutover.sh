@@ -57,6 +57,8 @@ for e in json.load(sys.stdin)['envs']:
   V=$([[ $K == DATABASE_URL ]] && echo "$NEW_POOLED_URL" || echo "$NEW_REDIS_URL")
   vc PATCH "/v9/projects/openreply/env/$ID" "$(python3 -c 'import json,sys;print(json.dumps({"value":sys.argv[1]}))' "$V")" >/dev/null && echo "   $K updated"
 done
+# Supabase is in Seoul (ap-northeast-2), Upstash in Tokyo: run functions in Seoul, not iad1.
+vc PATCH /v9/projects/openreply '{"resourceConfig":{"functionDefaultRegions":["icn1"]}}' | python3 -c "import json,sys;d=json.load(sys.stdin);print('   function region', d.get('resourceConfig',{}).get('functionDefaultRegions'), d.get('error',''))"
 LAST=$(vc GET "/v6/deployments?projectId=$PID&target=production&limit=1" | python3 -c "import json,sys;print(json.load(sys.stdin)['deployments'][0]['uid'])")
 vc POST "/v13/deployments?forceNew=1" "{\"name\":\"openreply\",\"deploymentId\":\"$LAST\",\"target\":\"production\"}" | python3 -c "import json,sys;d=json.load(sys.stdin);print('   vercel redeploy', d.get('id'), d.get('error'))"
 
